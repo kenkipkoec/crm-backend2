@@ -1,10 +1,9 @@
 # app.py
-from flask import Flask, request
+from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_jwt_extended import JWTManager
 import os
-
 
 from db import db
 from routes.auth import auth_bp
@@ -40,20 +39,6 @@ def create_app():
     app.register_blueprint(contacts_bp, url_prefix="/api/contacts")
     app.register_blueprint(accounts_bp, url_prefix="/api/accounts")
     app.register_blueprint(journal_bp, url_prefix="/api/journal")
-
-    # Manually enforce CORS headers (especially important for Render + credentials)
-    @app.after_request
-    def add_cors_headers(response):
-        origin = request.headers.get("Origin")
-        if origin in [
-            "https://crm-web-app-i8ks.vercel.app",
-            "http://localhost:5173"
-        ]:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
-            response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
-        return response
 
     return app
 

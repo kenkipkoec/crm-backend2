@@ -21,7 +21,7 @@ def create_app():
     app.config['JWT_SECRET_KEY'] = os.getenv("SECRET_KEY")
     db.init_app(app)
     jwt = JWTManager(app)
-    CORS(app, supports_credentials=True)
+    CORS(app, supports_credentials=True, origins=["https://crm-web-app-i8ks.vercel.app"])
     app.url_map.strict_slashes = False
 
     # Register blueprints

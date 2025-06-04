@@ -6,6 +6,11 @@ from flask_jwt_extended import JWTManager
 import os
 
 from db import db
+from routes.auth import auth_bp
+from routes.tasks import tasks_bp
+from routes.contacts import contacts_bp
+from routes.accounts import accounts_bp
+from routes.journal import journal_bp
 
 load_dotenv()
 
@@ -19,12 +24,11 @@ def create_app():
     CORS(app, supports_credentials=True)
     app.url_map.strict_slashes = False  # Allow both /api/tasks and /api/tasks/
     # Register blueprints
-    from routes.auth import auth_bp
-    from routes.tasks import tasks_bp
-    from routes.contacts import contacts_bp
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(tasks_bp, url_prefix="/api/tasks")
     app.register_blueprint(contacts_bp, url_prefix="/api/contacts")
+    app.register_blueprint(accounts_bp, url_prefix="/api/accounts")
+    app.register_blueprint(journal_bp, url_prefix="/api/journal")
     return app
 
 if __name__ == "__main__":

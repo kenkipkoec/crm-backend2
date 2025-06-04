@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models import db, JournalEntry, JournalLine, Account
 from datetime import datetime
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 def parse_date(date_str):
     try:
@@ -10,82 +11,87 @@ def parse_date(date_str):
 
 journal_bp = Blueprint('journal', __name__)
 
-@journal_bp.route('/', methods=['GET'])
-def get_entries():
-    start_date = parse_date(request.args.get('start_date')) if request.args.get('start_date') else None
-    end_date = parse_date(request.args.get('end_date')) if request.args.get('end_date') else None
+@journal_bp.route('', methods=['GET', 'POST'])
+@jwt_required()
+def journal_entries():
+    user_id = get_jwt_identity()
+    if request.method == 'GET':
+        entries = JournalEntry.query.filter_by(user_id=user_id).order_by(JournalEntry.date.desc()).all()
+        result = []
+        for entry in entries:
+            lines = []
+            for line in entry.lines:
+                acc = Account.query.get(line.account_id)
+                lines.append({
+                    "account_id": line.account_id,
+                    "account_code": acc.code if acc else "",
+                    "account_name": acc.name if acc else "",
+                    "debit": float(line.debit),
+                    "credit": float(line.credit)
+                })
+            result.append({
+                "id": entry.id,
+                "date": entry.date.isoformat(),
+                "description": entry.description,
+                "lines": lines
+            })
+        return jsonify(result)
+    else:
+        data = request.get_json()
+        # Validate required fields
+        if not data or 'date' not in data or 'lines' not in data or not data['lines']:
+            return jsonify({'error': 'Date and at least two journal lines are required.'}), 400
 
-    query = JournalEntry.query
-    if start_date:
-        query = query.filter(JournalEntry.date >= start_date)
-    if end_date:
-        query = query.filter(JournalEntry.date <= end_date)
+        if len(data['lines']) < 2:
+            return jsonify({'error': 'At least two journal lines are required.'}), 400
 
-    entries = query.all()
-    result = []
-    for entry in entries:
-        lines = [{
-            'id': line.id,
-            'account_id': line.account_id,
-            'account_name': line.account.name,
-            'debit': float(line.debit),
-            'credit': float(line.credit)
-        } for line in entry.lines]
-        result.append({
-            'id': entry.id,
-            'date': entry.date.isoformat(),
-            'description': entry.description,
-            'lines': lines
-        })
-    return jsonify(result)
+        # Validate date format
+        entry_date = parse_date(data['date'])
+        if not entry_date:
+            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
-@journal_bp.route('/', methods=['POST'])
-def add_entry():
-    data = request.get_json()
-    # Validate required fields
-    if not data or 'date' not in data or 'lines' not in data or not data['lines']:
-        return jsonify({'error': 'Date and at least one journal line are required.'}), 400
+        # Validate accounts and sum debits/credits
+        total_debit = 0
+        total_credit = 0
+        for line in data['lines']:
+            if 'account_id' not in line:
+                return jsonify({'error': 'Each line must have an account_id.'}), 400
+            account = Account.query.get(line['account_id'])
+            if not account:
+                return jsonify({'error': f"Account ID {line['account_id']} does not exist."}), 400
+            try:
+                debit = float(line.get('debit', 0))
+                credit = float(line.get('credit', 0))
+            except Exception:
+                return jsonify({'error': 'Debit and credit must be numbers.'}), 400
+            total_debit += debit
+            total_credit += credit
 
-    # Validate date format
-    entry_date = parse_date(data['date'])
-    if not entry_date:
-        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+        if round(total_debit, 2) != round(total_credit, 2):
+            return jsonify({'error': 'Total debits and credits must be equal.'}), 400
 
-    # Validate accounts and sum debits/credits
-    total_debit = 0
-    total_credit = 0
-    for line in data['lines']:
-        if 'account_id' not in line:
-            return jsonify({'error': 'Each line must have an account_id.'}), 400
-        account = Account.query.get(line['account_id'])
-        if not account:
-            return jsonify({'error': f"Account ID {line['account_id']} does not exist."}), 400
-        debit = float(line.get('debit', 0))
-        credit = float(line.get('credit', 0))
-        total_debit += debit
-        total_credit += credit
+        try:
+            entry = JournalEntry(
+                user_id=user_id,
+                date=entry_date,
+                description=data.get('description', '')
+            )
+            db.session.add(entry)
+            db.session.flush()  # Get entry.id before adding lines
 
-    if round(total_debit, 2) != round(total_credit, 2):
-        return jsonify({'error': 'Total debits and credits must be equal.'}), 400
-
-    # Create entry and lines
-    entry = JournalEntry(
-        date=entry_date,
-        description=data.get('description', '')
-    )
-    db.session.add(entry)
-    db.session.flush()  # Get entry.id before adding lines
-
-    for line in data['lines']:
-        journal_line = JournalLine(
-            entry_id=entry.id,
-            account_id=line['account_id'],
-            debit=line.get('debit', 0),
-            credit=line.get('credit', 0)
-        )
-        db.session.add(journal_line)
-    db.session.commit()
-    return jsonify({'message': 'Journal entry created'}), 201
+            for line in data['lines']:
+                journal_line = JournalLine(
+                    entry_id=entry.id,
+                    account_id=line['account_id'],
+                    debit=float(line.get('debit', 0)),
+                    credit=float(line.get('credit', 0))
+                )
+                db.session.add(journal_line)
+            db.session.commit()
+            return jsonify({'id': entry.id, 'message': 'Journal entry created'}), 201
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Failed to create journal entry: {str(e)}'}), 500
 
 @journal_bp.route('/ledger/<int:account_id>', methods=['GET'])
 def general_ledger(account_id):
@@ -125,145 +131,186 @@ def general_ledger(account_id):
     })
 
 @journal_bp.route('/trial-balance', methods=['GET'])
+@jwt_required()
 def trial_balance():
-    start_date = parse_date(request.args.get('start_date')) if request.args.get('start_date') else None
-    end_date = parse_date(request.args.get('end_date')) if request.args.get('end_date') else None
-
-    accounts = Account.query.all()
+    user_id = get_jwt_identity()
+    accounts = Account.query.filter_by(user_id=user_id).all()
     result = []
     total_debit = 0
     total_credit = 0
     for acc in accounts:
-        lines_query = JournalLine.query.filter_by(account_id=acc.id)
-        if start_date:
-            lines_query = lines_query.join(JournalEntry).filter(JournalEntry.date >= start_date)
-        if end_date:
-            lines_query = lines_query.join(JournalEntry).filter(JournalEntry.date <= end_date)
-        debit = db.session.query(db.func.sum(JournalLine.debit)).filter(JournalLine.id.in_([l.id for l in lines_query])).scalar() or 0
-        credit = db.session.query(db.func.sum(JournalLine.credit)).filter(JournalLine.id.in_([l.id for l in lines_query])).scalar() or 0
-        balance = float(debit) - float(credit)
+        debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id
+        ).scalar() or 0
+        credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id
+        ).scalar() or 0
+        balance = debit - credit
         result.append({
-            'account_id': acc.id,
-            'account_name': acc.name,
-            'account_code': acc.code,
-            'debit': float(debit),
-            'credit': float(credit),
-            'balance': balance
+            "account_id": acc.id,
+            "account_code": acc.code,
+            "account_name": acc.name,
+            "debit": float(debit),
+            "credit": float(credit),
+            "balance": float(balance)
         })
-        total_debit += float(debit)
-        total_credit += float(credit)
+        total_debit += debit
+        total_credit += credit
     return jsonify({
-        'accounts': result,
-        'total_debit': total_debit,
-        'total_credit': total_credit
+        "accounts": result,
+        "total_debit": float(total_debit),
+        "total_credit": float(total_credit)
     })
 
-@journal_bp.route('/income-statement', methods=['GET'])
+@journal_bp.route('/income-statement')
+@jwt_required()
 def income_statement():
-    start_date = parse_date(request.args.get('start_date')) if request.args.get('start_date') else None
-    end_date = parse_date(request.args.get('end_date')) if request.args.get('end_date') else None
+    user_id = get_jwt_identity()
+    income_accounts = Account.query.filter_by(user_id=user_id, type="Income").all()
+    expense_accounts = Account.query.filter_by(user_id=user_id, type="Expense").all()
 
-    income_types = ['Revenue', 'Income']
-    expense_types = ['Expense']
+    def sum_account(acc):
+        debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id
+        ).scalar() or 0
+        credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id
+        ).scalar() or 0
+        return credit - debit if acc.type == "Income" else debit - credit
 
-    income_accounts = Account.query.filter(Account.type.in_(income_types)).all()
-    expense_accounts = Account.query.filter(Account.type.in_(expense_types)).all()
-
-    total_income = 0
-    total_expense = 0
-    income_details = []
-    expense_details = []
-
+    income = []
+    expense = []
     for acc in income_accounts:
-        lines_query = JournalLine.query.filter_by(account_id=acc.id)
-        if start_date:
-            lines_query = lines_query.join(JournalEntry).filter(JournalEntry.date >= start_date)
-        if end_date:
-            lines_query = lines_query.join(JournalEntry).filter(JournalEntry.date <= end_date)
-        credit = db.session.query(db.func.sum(JournalLine.credit)).filter(JournalLine.id.in_([l.id for l in lines_query])).scalar() or 0
-        debit = db.session.query(db.func.sum(JournalLine.debit)).filter(JournalLine.id.in_([l.id for l in lines_query])).scalar() or 0
-        amount = float(credit) - float(debit)
-        total_income += amount
-        income_details.append({
-            'account_id': acc.id,
-            'account_name': acc.name,
-            'amount': amount
+        amt = sum_account(acc)
+        income.append({
+            "account_id": acc.id,
+            "account_code": acc.code,
+            "account_name": acc.name,
+            "amount": float(amt)
         })
-
     for acc in expense_accounts:
-        lines_query = JournalLine.query.filter_by(account_id=acc.id)
-        if start_date:
-            lines_query = lines_query.join(JournalEntry).filter(JournalEntry.date >= start_date)
-        if end_date:
-            lines_query = lines_query.join(JournalEntry).filter(JournalEntry.date <= end_date)
-        debit = db.session.query(db.func.sum(JournalLine.debit)).filter(JournalLine.id.in_([l.id for l in lines_query])).scalar() or 0
-        credit = db.session.query(db.func.sum(JournalLine.credit)).filter(JournalLine.id.in_([l.id for l in lines_query])).scalar() or 0
-        amount = float(debit) - float(credit)
-        total_expense += amount
-        expense_details.append({
-            'account_id': acc.id,
-            'account_name': acc.name,
-            'amount': amount
+        amt = sum_account(acc)
+        expense.append({
+            "account_id": acc.id,
+            "account_code": acc.code,
+            "account_name": acc.name,
+            "amount": float(amt)
         })
+    total_income = sum(i["amount"] for i in income)
+    total_expense = sum(e["amount"] for e in expense)
+    net_income = total_income - total_expense
+    return jsonify({
+        "income": income,
+        "expense": expense,
+        "total_income": total_income,
+        "total_expense": total_expense,
+        "net_income": net_income
+    })
 
+@journal_bp.route('/balance-sheet')
+@jwt_required()
+def balance_sheet():
+    user_id = get_jwt_identity()
+    asset_accounts = Account.query.filter_by(user_id=user_id, type="Asset").all()
+    liability_accounts = Account.query.filter_by(user_id=user_id, type="Liability").all()
+    equity_accounts = Account.query.filter_by(user_id=user_id, type="Equity").all()
+    income_accounts = Account.query.filter_by(user_id=user_id, type="Income").all()
+    expense_accounts = Account.query.filter_by(user_id=user_id, type="Expense").all()
+
+    def sum_account(acc):
+        debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id
+        ).scalar() or 0
+        credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id
+        ).scalar() or 0
+        if acc.type == "Asset":
+            return debit - credit
+        elif acc.type == "Liability" or acc.type == "Equity":
+            return credit - debit
+        elif acc.type == "Income":
+            return credit - debit
+        elif acc.type == "Expense":
+            return debit - credit
+        return 0
+
+    assets = [{
+        "account_id": acc.id,
+        "account_code": acc.code,
+        "account_name": acc.name,
+        "balance": float(sum_account(acc))
+    } for acc in asset_accounts]
+    liabilities = [{
+        "account_id": acc.id,
+        "account_code": acc.code,
+        "account_name": acc.name,
+        "balance": float(sum_account(acc))
+    } for acc in liability_accounts]
+    equity = [{
+        "account_id": acc.id,
+        "account_code": acc.code,
+        "account_name": acc.name,
+        "balance": float(sum_account(acc))
+    } for acc in equity_accounts]
+
+    total_assets = sum(a["balance"] for a in assets)
+    total_liabilities = sum(l["balance"] for l in liabilities)
+    total_equity = sum(e["balance"] for e in equity)
+
+    total_income = sum(float(sum_account(acc)) for acc in income_accounts)
+    total_expense = sum(float(sum_account(acc)) for acc in expense_accounts)
     net_income = total_income - total_expense
 
-    return jsonify({
-        'income': income_details,
-        'expense': expense_details,
-        'total_income': total_income,
-        'total_expense': total_expense,
-        'net_income': net_income
+    equity.append({
+        "account_id": None,
+        "account_code": "",
+        "account_name": "Net Income",
+        "balance": float(net_income)
     })
-
-@journal_bp.route('/balance-sheet', methods=['GET'])
-def balance_sheet():
-    asset_types = ['Asset']
-    liability_types = ['Liability']
-    equity_types = ['Equity']
-
-    def get_accounts_by_type(types):
-        return Account.query.filter(Account.type.in_(types)).all()
-
-    def get_balance(acc):
-        debit = db.session.query(db.func.sum(JournalLine.debit)).filter_by(account_id=acc.id).scalar() or 0
-        credit = db.session.query(db.func.sum(JournalLine.credit)).filter_by(account_id=acc.id).scalar() or 0
-        if acc.type == 'Asset':
-            return float(debit) - float(credit)
-        else:
-            return float(credit) - float(debit)
-
-    assets = get_accounts_by_type(asset_types)
-    liabilities = get_accounts_by_type(liability_types)
-    equity = get_accounts_by_type(equity_types)
-
-    asset_total = 0
-    liability_total = 0
-    equity_total = 0
-
-    asset_details = []
-    for acc in assets:
-        bal = get_balance(acc)
-        asset_total += bal
-        asset_details.append({'account_id': acc.id, 'account_name': acc.name, 'balance': bal})
-
-    liability_details = []
-    for acc in liabilities:
-        bal = get_balance(acc)
-        liability_total += bal
-        liability_details.append({'account_id': acc.id, 'account_name': acc.name, 'balance': bal})
-
-    equity_details = []
-    for acc in equity:
-        bal = get_balance(acc)
-        equity_total += bal
-        equity_details.append({'account_id': acc.id, 'account_name': acc.name, 'balance': bal})
+    total_equity += net_income
 
     return jsonify({
-        'assets': asset_details,
-        'liabilities': liability_details,
-        'equity': equity_details,
-        'total_assets': asset_total,
-        'total_liabilities': liability_total,
-        'total_equity': equity_total
+        "assets": assets,
+        "liabilities": liabilities,
+        "equity": equity,
+        "total_assets": float(total_assets),
+        "total_liabilities": float(total_liabilities),
+        "total_equity": float(total_equity),
+        "net_income": float(net_income)
     })
+
+@journal_bp.route('/<int:entry_id>', methods=['PUT'])
+@jwt_required()
+def edit_journal_entry(entry_id):
+    user_id = get_jwt_identity()
+    entry = JournalEntry.query.filter_by(id=entry_id, user_id=user_id).first_or_404()
+    data = request.get_json()
+    entry.date = data.get('date', entry.date)
+    entry.description = data.get('description', entry.description)
+    # Remove old lines
+    JournalLine.query.filter_by(entry_id=entry.id).delete()
+    # Add new lines
+    for line in data['lines']:
+        db.session.add(JournalLine(
+            entry_id=entry.id,
+            account_id=line['account_id'],
+            debit=line['debit'],
+            credit=line['credit']
+        ))
+    db.session.commit()
+    return jsonify({'message': 'Journal entry updated'})
+
+@journal_bp.route('/<int:entry_id>', methods=['DELETE'])
+@jwt_required()
+def delete_journal_entry(entry_id):
+    user_id = get_jwt_identity()
+    entry = JournalEntry.query.filter_by(id=entry_id, user_id=user_id).first_or_404()
+    db.session.delete(entry)
+    db.session.commit()
+    return jsonify({'message': 'Journal entry deleted'})

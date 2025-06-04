@@ -19,9 +19,16 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL")
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.getenv("SECRET_KEY")
+    
     db.init_app(app)
     jwt = JWTManager(app)
-    CORS(app, supports_credentials=True, resources={r"/*": {"origins": "https://crm-web-app-i8ks.vercel.app"}})
+    
+    # Correct CORS setup
+    CORS(app, supports_credentials=True, origins=[
+        "https://crm-web-app-i8ks.vercel.app",
+        "http://localhost:5173"  # Optional: for local frontend testing
+    ])
+    
     app.url_map.strict_slashes = False
 
     # Register blueprints

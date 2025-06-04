@@ -20,17 +20,20 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.getenv("SECRET_KEY")
     db.init_app(app)
-    jwt = JWTManager(app)  # <-- Make sure this is here!
+    jwt = JWTManager(app)
     CORS(app, supports_credentials=True)
-    app.url_map.strict_slashes = False  # Allow both /api/tasks and /api/tasks/
+    app.url_map.strict_slashes = False
+
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(tasks_bp, url_prefix="/api/tasks")
     app.register_blueprint(contacts_bp, url_prefix="/api/contacts")
     app.register_blueprint(accounts_bp, url_prefix="/api/accounts")
     app.register_blueprint(journal_bp, url_prefix="/api/journal")
+
     return app
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)

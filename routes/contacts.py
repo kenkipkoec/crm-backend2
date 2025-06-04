@@ -14,7 +14,7 @@ def validate_contact(data):
         return 'Invalid phone number.'
     return None
 
-@contacts_bp.route('/', methods=['GET'])
+@contacts_bp.route("", methods=["GET"])  # <-- NO trailing slash
 @jwt_required()
 def get_contacts():
     user_id = get_jwt_identity()
@@ -28,7 +28,7 @@ def get_contacts():
         'notes': c.notes
     } for c in contacts])
 
-@contacts_bp.route('/', methods=['POST'])
+@contacts_bp.route("", methods=["POST"])  # <-- NO trailing slash
 @jwt_required()
 def add_contact():
     user_id = get_jwt_identity()
@@ -46,7 +46,15 @@ def add_contact():
     )
     db.session.add(contact)
     db.session.commit()
-    return jsonify({'message': 'Contact created', 'id': contact.id}), 201
+    # Return the full contact object
+    return jsonify({
+        'id': contact.id,
+        'name': contact.name,
+        'email': contact.email,
+        'phone': contact.phone,
+        'company': contact.company,
+        'notes': contact.notes
+    }), 201
 
 @contacts_bp.route('/<int:contact_id>', methods=['PUT'])
 @jwt_required()

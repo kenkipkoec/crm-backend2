@@ -1,7 +1,8 @@
 from flask import Blueprint, request, jsonify
-from models import db, User
-from werkzeug.security import generate_password_hash, check_password_hash
+from db import db
+from models import User
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
 import re
 
 auth_bp = Blueprint('auth', __name__)
@@ -9,7 +10,7 @@ auth_bp = Blueprint('auth', __name__)
 @auth_bp.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
-    required = ['username', 'name', 'email', 'contact', 'password']
+    required = ['username', 'firstName', 'lastName', 'email', 'contact', 'password']
     if not all(field in data and data[field] for field in required):
         return jsonify({'error': 'All fields are required.'}), 400
     if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', data['email']):
@@ -23,23 +24,63 @@ def signup():
     hashed_pw = generate_password_hash(data['password'])
     user = User(
         username=data['username'],
-        name=data['name'],
+        firstName=data['firstName'],
+        lastName=data['lastName'],
         email=data['email'],
         contact=data['contact'],
         password=hashed_pw
     )
     db.session.add(user)
     db.session.commit()
-    token = create_access_token(identity=user.id)
-    return jsonify({'token': token, 'user': {'id': user.id, 'username': user.username, 'name': user.name, 'email': user.email, 'contact': user.contact}}), 201
+    token = create_access_token(identity=str(user.id))
+    return jsonify({
+        'token': token,
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'firstName': user.firstName,
+            'lastName': user.lastName,
+            'email': user.email,
+            'contact': user.contact
+        }
+    }), 201
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    if not data.get('username') or not data.get('password'):
-        return jsonify({'error': 'Username and password are required.'}), 400
-    user = User.query.filter_by(username=data['username']).first()
-    if not user or not check_password_hash(user.password, data['password']):
-        return jsonify({'error': 'Invalid credentials.'}), 401
-    token = create_access_token(identity=user.id)
-    return jsonify({'token': token, 'user': {'id': user.id, 'username': user.username, 'name': user.name, 'email': user.email, 'contact': user.contact}})
+    login = data.get('login')
+    password = data.get('password')
+    user = User.query.filter(
+        (User.username == login) | (User.email == login)
+    ).first()
+    if not user or not check_password_hash(user.password, password):
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    token = create_access_token(identity=str(user.id))
+    return jsonify({
+        'token': token,
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'firstName': user.firstName,
+            'lastName': user.lastName,
+            'email': user.email,
+            'contact': user.contact
+        }
+    })
+
+@auth_bp.route('/me', methods=['GET'])
+@jwt_required()
+def me():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'firstName': user.firstName,
+        'lastName': user.lastName,
+        'email': user.email,
+        'contact': user.contact
+    })

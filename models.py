@@ -1,5 +1,4 @@
-# models.py
-from app import db
+from db import db
 from datetime import datetime
 
 class Account(db.Model):
@@ -25,7 +24,8 @@ class JournalLine(db.Model):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    name = db.Column(db.String(120), nullable=False)
+    firstName = db.Column(db.String(80), nullable=False)
+    lastName = db.Column(db.String(80), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     contact = db.Column(db.String(20))
     password = db.Column(db.String(200), nullable=False)
@@ -36,7 +36,7 @@ class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     description = db.Column(db.String(255), nullable=False)
-    due_date = db.Column(db.DateTime)
+    dueDate = db.Column(db.String(50))  # <-- use dueDate, not due_date
     category = db.Column(db.String(50))
     recurrence = db.Column(db.String(50))
     notes = db.Column(db.Text)

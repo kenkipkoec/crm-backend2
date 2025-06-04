@@ -1,86 +1,87 @@
 from flask import Blueprint, request, jsonify
-from models import db, Task
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from db import db
+from models import Task
 from datetime import datetime
 
-tasks_bp = Blueprint('tasks', __name__)
+tasks_bp = Blueprint("tasks", __name__)
 
 def validate_task(data):
-    if not data.get('description'):
-        return 'Description is required.'
-    if data.get('due_date'):
-        try:
-            datetime.fromisoformat(data['due_date'])
-        except Exception:
-            return 'Invalid due_date format. Use ISO format.'
+    if not data.get("description"):
+        return "Description is required."
     return None
 
-@tasks_bp.route('/', methods=['GET'])
+@tasks_bp.route("", methods=["GET", "POST"])
 @jwt_required()
-def get_tasks():
+def tasks():
     user_id = get_jwt_identity()
-    tasks = Task.query.filter_by(user_id=user_id).all()
-    return jsonify([{
-        'id': t.id,
-        'description': t.description,
-        'due_date': t.due_date.isoformat() if t.due_date else None,
-        'category': t.category,
-        'recurrence': t.recurrence,
-        'notes': t.notes,
-        'priority': t.priority,
-        'completed': t.completed,
-        'created_at': t.created_at.isoformat() if t.created_at else None
-    } for t in tasks])
+    if request.method == "GET":
+        tasks = Task.query.filter_by(user_id=user_id).all()
+        return jsonify([{
+            "id": t.id,
+            "description": t.description,
+            "dueDate": t.dueDate,  # <-- use dueDate
+            "category": t.category,
+            "recurrence": t.recurrence,
+            "notes": t.notes,
+            "priority": t.priority,
+            "completed": t.completed,
+            "createdAt": t.created_at.isoformat() if t.created_at else None
+        } for t in tasks])
+    else:
+        data = request.get_json()
+        error = validate_task(data)
+        if error:
+            return jsonify({"error": error}), 400
+        task = Task(
+            user_id=user_id,
+            description=data["description"],
+            dueDate=data.get("dueDate"),  # <-- use dueDate
+            category=data.get("category"),
+            recurrence=data.get("recurrence"),
+            notes=data.get("notes"),
+            priority=data.get("priority"),
+            completed=data.get("completed", False)
+        )
+        db.session.add(task)
+        db.session.commit()
+        return jsonify({
+            "id": task.id,
+            "description": task.description,
+            "dueDate": task.dueDate,
+            "category": task.category,
+            "recurrence": task.recurrence,
+            "notes": task.notes,
+            "priority": task.priority,
+            "completed": task.completed,
+            "createdAt": task.created_at.isoformat() if task.created_at else None
+        }), 201
 
-@tasks_bp.route('/', methods=['POST'])
+@tasks_bp.route("/<int:id>", methods=["PUT", "DELETE"])
 @jwt_required()
-def add_task():
+def task_detail(id):
     user_id = get_jwt_identity()
-    data = request.get_json()
-    error = validate_task(data)
-    if error:
-        return jsonify({'error': error}), 400
-    task = Task(
-        user_id=user_id,
-        description=data['description'],
-        due_date=datetime.fromisoformat(data['due_date']) if data.get('due_date') else None,
-        category=data.get('category'),
-        recurrence=data.get('recurrence'),
-        notes=data.get('notes'),
-        priority=data.get('priority'),
-        completed=data.get('completed', False)
-    )
-    db.session.add(task)
-    db.session.commit()
-    return jsonify({'message': 'Task created', 'id': task.id}), 201
-
-@tasks_bp.route('/<int:task_id>', methods=['PUT'])
-@jwt_required()
-def update_task(task_id):
-    user_id = get_jwt_identity()
-    task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+    task = Task.query.filter_by(id=id, user_id=user_id).first()
     if not task:
-        return jsonify({'error': 'Task not found.'}), 404
-    data = request.get_json()
-    error = validate_task({**data, 'description': data.get('description', task.description)})
-    if error:
-        return jsonify({'error': error}), 400
-    for field in ['description', 'due_date', 'category', 'recurrence', 'notes', 'priority', 'completed']:
-        if field in data:
-            if field == 'due_date' and data[field]:
-                setattr(task, field, datetime.fromisoformat(data[field]))
-            else:
+        return jsonify({"error": "Task not found"}), 404
+    if request.method == "PUT":
+        data = request.get_json()
+        for field in ["description", "dueDate", "category", "recurrence", "notes", "priority", "completed"]:
+            if field in data:
                 setattr(task, field, data[field])
-    db.session.commit()
-    return jsonify({'message': 'Task updated'})
-
-@tasks_bp.route('/<int:task_id>', methods=['DELETE'])
-@jwt_required()
-def delete_task(task_id):
-    user_id = get_jwt_identity()
-    task = Task.query.filter_by(id=task_id, user_id=user_id).first()
-    if not task:
-        return jsonify({'error': 'Task not found.'}), 404
-    db.session.delete(task)
-    db.session.commit()
-    return jsonify({'message': 'Task deleted'})
+        db.session.commit()
+        return jsonify({
+            "id": task.id,
+            "description": task.description,
+            "dueDate": task.dueDate,
+            "category": task.category,
+            "recurrence": task.recurrence,
+            "notes": task.notes,
+            "priority": task.priority,
+            "completed": task.completed,
+            "createdAt": task.created_at.isoformat() if task.created_at else None
+        })
+    else:
+        db.session.delete(task)
+        db.session.commit()
+        return jsonify({"message": "Task deleted"})

@@ -24,12 +24,14 @@ def create_app():
     jwt = JWTManager(app)
 
     # Correct CORS setup for frontend (Vercel + optional localhost)
-    CORS(app,
-         supports_credentials=True,
-         resources={r"/api/*": {"origins": [
-             "https://crm-web-app-i8ks.vercel.app",
-             "http://localhost:5173"
-         ]}})
+    CORS(
+    app,
+    supports_credentials=True,
+    resources={r"/api/*": {"origins": [
+        "https://crm-web-app-i8ks.vercel.app",
+        "http://localhost:5173"
+    ]}}
+)
 
     app.url_map.strict_slashes = False
 

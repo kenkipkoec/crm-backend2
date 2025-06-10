@@ -44,7 +44,7 @@ def create_app():
     app,
     supports_credentials=True,
     resources={r"/api/*": {"origins": [
-        "https://crm-web-app-i8ks.vercel.app",
+        "https://crm-web-app-orpin.vercel.app",
         "http://localhost:5173"
     ]}}
 )

@@ -3,7 +3,9 @@ from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_jwt_extended import JWTManager
+from flask_migrate import Migrate
 import os
+import logging
 
 from db import db
 from routes.auth import auth_bp
@@ -11,8 +13,21 @@ from routes.tasks import tasks_bp
 from routes.contacts import contacts_bp
 from routes.accounts import accounts_bp
 from routes.journal import journal_bp
+from routes.books import books_bp
+
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(threadName)s : %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
@@ -21,6 +36,7 @@ def create_app():
     app.config['JWT_SECRET_KEY'] = os.getenv("SECRET_KEY")
 
     db.init_app(app)
+    migrate = Migrate(app, db)
     jwt = JWTManager(app)
 
     # Correct CORS setup for frontend (Vercel + optional localhost)
@@ -41,6 +57,7 @@ def create_app():
     app.register_blueprint(contacts_bp, url_prefix="/api/contacts")
     app.register_blueprint(accounts_bp, url_prefix="/api/accounts")
     app.register_blueprint(journal_bp, url_prefix="/api/journal")
+    app.register_blueprint(books_bp, url_prefix="/api/books")
 
     return app
 

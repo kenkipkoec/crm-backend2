@@ -10,12 +10,17 @@ accounts_bp = Blueprint('accounts', __name__)
 @jwt_required()
 def get_accounts():
     user_id = get_jwt_identity()
-    accounts = Account.query.filter_by(user_id=user_id).all()
+    book_id = request.args.get('book_id', type=int)
+    if not book_id:
+        return jsonify({'error': 'book_id is required'}), 400
+    accounts = Account.query.filter_by(user_id=user_id, book_id=book_id).all()
     return jsonify([{
         'id': acc.id,
         'name': acc.name,
         'type': acc.type,
-        'code': acc.code
+        'code': acc.code,
+        'category': acc.category,
+        'parent_id': acc.parent_id
     } for acc in accounts])
 
 @accounts_bp.route('', methods=['POST'])
@@ -28,7 +33,9 @@ def add_account():
             name=data['name'],
             type=data['type'],
             code=data['code'],
-            user_id=user_id
+            user_id=user_id,
+            category=data.get('category'),
+            parent_id=data.get('parent_id')
         )
         db.session.add(account)
         db.session.commit()
@@ -49,6 +56,8 @@ def edit_account(account_id):
     account.name = data.get('name', account.name)
     account.type = data.get('type', account.type)
     account.code = data.get('code', account.code)
+    account.category = data.get('category', account.category)
+    account.parent_id = data.get('parent_id', account.parent_id)
     db.session.commit()
     return jsonify({'message': 'Account updated'})
 

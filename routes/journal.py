@@ -167,19 +167,19 @@ def trial_balance():
         return jsonify({"error": "book_id is required"}), 400
     accounts = Account.query.filter_by(user_id=user_id, book_id=book_id).all()
     result = []
-    total_debit = 0
-    total_credit = 0
+    total_debit = 0.0
+    total_credit = 0.0
     for acc in accounts:
         debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
             JournalLine.account_id == acc.id,
             JournalEntry.user_id == user_id,
             JournalEntry.book_id == book_id
-        ).scalar() or 0
+        ).scalar() or 0.0
         credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
             JournalLine.account_id == acc.id,
             JournalEntry.user_id == user_id,
             JournalEntry.book_id == book_id
-        ).scalar() or 0
+        ).scalar() or 0.0
         balance = debit - credit
         result.append({
             "account_id": acc.id,
@@ -189,8 +189,8 @@ def trial_balance():
             "credit": float(credit),
             "balance": float(balance)
         })
-        total_debit += debit
-        total_credit += credit
+        total_debit += float(debit)
+        total_credit += float(credit)
     return jsonify({
         "accounts": result,
         "total_debit": float(total_debit),
@@ -204,49 +204,47 @@ def income_statement():
     book_id = request.args.get("book_id", type=int)
     if not book_id:
         return jsonify({"error": "book_id is required"}), 400
-    income_accounts = Account.query.filter_by(user_id=user_id, type="Income", book_id=book_id).all()
-    expense_accounts = Account.query.filter_by(user_id=user_id, type="Expense", book_id=book_id).all()
-
-    def sum_account(acc):
-        debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
-            JournalLine.account_id == acc.id,
-            JournalEntry.user_id == user_id,
-            JournalEntry.book_id == book_id
-        ).scalar() or 0
-        credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
-            JournalLine.account_id == acc.id,
-            JournalEntry.user_id == user_id,
-            JournalEntry.book_id == book_id
-        ).scalar() or 0
-        return credit - debit if acc.type == "Income" else debit - credit
-
+    # Income accounts
+    income_accounts = Account.query.filter_by(user_id=user_id, book_id=book_id, type="Income").all()
     income = []
-    expense = []
+    total_income = 0.0
     for acc in income_accounts:
-        amt = sum_account(acc)
+        amount = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id,
+            JournalEntry.book_id == book_id
+        ).scalar() or 0.0
         income.append({
             "account_id": acc.id,
             "account_code": acc.code,
             "account_name": acc.name,
-            "amount": float(amt)
+            "amount": float(amount)
         })
+        total_income += float(amount)
+    # Expense accounts
+    expense_accounts = Account.query.filter_by(user_id=user_id, book_id=book_id, type="Expense").all()
+    expense = []
+    total_expense = 0.0
     for acc in expense_accounts:
-        amt = sum_account(acc)
+        amount = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id,
+            JournalEntry.book_id == book_id
+        ).scalar() or 0.0
         expense.append({
             "account_id": acc.id,
             "account_code": acc.code,
             "account_name": acc.name,
-            "amount": float(amt)
+            "amount": float(amount)
         })
-    total_income = sum(i["amount"] for i in income)
-    total_expense = sum(e["amount"] for e in expense)
+        total_expense += float(amount)
     net_income = total_income - total_expense
     return jsonify({
         "income": income,
         "expense": expense,
-        "total_income": total_income,
-        "total_expense": total_expense,
-        "net_income": net_income
+        "total_income": float(total_income),
+        "total_expense": float(total_expense),
+        "net_income": float(net_income)
     })
 
 @journal_bp.route("/balance-sheet", methods=["GET"])
@@ -256,76 +254,82 @@ def balance_sheet():
     book_id = request.args.get("book_id", type=int)
     if not book_id:
         return jsonify({"error": "book_id is required"}), 400
-    asset_accounts = Account.query.filter_by(user_id=user_id, type="Asset", book_id=book_id).all()
-    liability_accounts = Account.query.filter_by(user_id=user_id, type="Liability", book_id=book_id).all()
-    equity_accounts = Account.query.filter_by(user_id=user_id, type="Equity", book_id=book_id).all()
-    income_accounts = Account.query.filter_by(user_id=user_id, type="Income", book_id=book_id).all()
-    expense_accounts = Account.query.filter_by(user_id=user_id, type="Expense", book_id=book_id).all()
-
-    def sum_account(acc):
+    # Assets
+    asset_accounts = Account.query.filter_by(user_id=user_id, book_id=book_id, type="Asset").all()
+    assets = []
+    total_assets = 0.0
+    for acc in asset_accounts:
         debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
             JournalLine.account_id == acc.id,
             JournalEntry.user_id == user_id,
             JournalEntry.book_id == book_id
-        ).scalar() or 0
+        ).scalar() or 0.0
         credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
             JournalLine.account_id == acc.id,
             JournalEntry.user_id == user_id,
             JournalEntry.book_id == book_id
-        ).scalar() or 0
-        if acc.type == "Asset":
-            return debit - credit
-        elif acc.type == "Liability" or acc.type == "Equity":
-            return credit - debit
-        elif acc.type == "Income":
-            return credit - debit
-        elif acc.type == "Expense":
-            return debit - credit
-        return 0
-
-    assets = [{
-        "account_id": acc.id,
-        "account_code": acc.code,
-        "account_name": acc.name,
-        "balance": float(sum_account(acc))
-    } for acc in asset_accounts]
-    liabilities = [{
-        "account_id": acc.id,
-        "account_code": acc.code,
-        "account_name": acc.name,
-        "balance": float(sum_account(acc))
-    } for acc in liability_accounts]
-    equity = [{
-        "account_id": acc.id,
-        "account_code": acc.code,
-        "account_name": acc.name,
-        "balance": float(sum_account(acc))
-    } for acc in equity_accounts]
-
-    total_assets = sum(a["balance"] for a in assets)
-    total_liabilities = sum(l["balance"] for l in liabilities)
-    total_equity = sum(e["balance"] for e in equity)
-
-    total_income = sum(float(sum_account(acc)) for acc in income_accounts)
-    total_expense = sum(float(sum_account(acc)) for acc in expense_accounts)
-    net_income = total_income - total_expense
-
-    equity.append({
-        "account_id": None,
-        "account_code": "",
-        "account_name": "Net Income",
-        "balance": float(net_income)
-    })
-    total_equity += net_income
-
+        ).scalar() or 0.0
+        balance = debit - credit
+        assets.append({
+            "account_id": acc.id,
+            "account_code": acc.code,
+            "account_name": acc.name,
+            "balance": float(balance)
+        })
+        total_assets += float(balance)
+    # Liabilities
+    liability_accounts = Account.query.filter_by(user_id=user_id, book_id=book_id, type="Liability").all()
+    liabilities = []
+    total_liabilities = 0.0
+    for acc in liability_accounts:
+        debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id,
+            JournalEntry.book_id == book_id
+        ).scalar() or 0.0
+        credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id,
+            JournalEntry.book_id == book_id
+        ).scalar() or 0.0
+        balance = credit - debit
+        liabilities.append({
+            "account_id": acc.id,
+            "account_code": acc.code,
+            "account_name": acc.name,
+            "balance": float(balance)
+        })
+        total_liabilities += float(balance)
+    # Equity
+    equity_accounts = Account.query.filter_by(user_id=user_id, book_id=book_id, type="Equity").all()
+    equity = []
+    total_equity = 0.0
+    for acc in equity_accounts:
+        debit = db.session.query(db.func.sum(JournalLine.debit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id,
+            JournalEntry.book_id == book_id
+        ).scalar() or 0.0
+        credit = db.session.query(db.func.sum(JournalLine.credit)).join(JournalEntry).filter(
+            JournalLine.account_id == acc.id,
+            JournalEntry.user_id == user_id,
+            JournalEntry.book_id == book_id
+        ).scalar() or 0.0
+        balance = credit - debit
+        equity.append({
+            "account_id": acc.id,
+            "account_code": acc.code,
+            "account_name": acc.name,
+            "balance": float(balance)
+        })
+        total_equity += float(balance)
     return jsonify({
         "assets": assets,
         "liabilities": liabilities,
         "equity": equity,
         "total_assets": float(total_assets),
         "total_liabilities": float(total_liabilities),
-        "total_equity": float(total_equity),
-        "net_income": float(net_income)
+        "total_equity": float(total_equity)
     })
 
 @journal_bp.route("/<int:entry_id>", methods=["DELETE"])

@@ -27,29 +27,43 @@ def get_accounts():
         'parent_id': acc.parent_id
     } for acc in accounts])
 
-@accounts_bp.route('', methods=['POST'])
+@accounts_bp.route('/', methods=['POST'])
 @jwt_required()
 def add_account():
     user_id = get_jwt_identity()
-    data = request.get_json()
-    try:
-        account = Account(
-            name=data['name'],
-            type=data['type'],
-            code=data['code'],
-            user_id=user_id,
-            category=data.get('category'),
-            parent_id=data.get('parent_id')
-        )
-        db.session.add(account)
-        db.session.commit()
-        return jsonify({'id': account.id}), 201
-    except IntegrityError as e:
-        db.session.rollback()
-        return jsonify({'error': 'Account code or name already exists.'}), 400
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 400
+    data = request.get_json() or {}
+    book_id = data.get('book_id')
+    name = data.get('name')
+    type_ = data.get('type')
+    code = data.get('code')
+    category = data.get('category')
+    parent_id = data.get('parent_id')
+
+    # Validate required fields
+    if not all([book_id, name, type_, code, category]):
+        return jsonify({'error': 'All fields (book_id, name, type, code, category) are required'}), 400
+
+    # Check if book exists for this user
+    book = AccountingBook.query.filter_by(id=book_id, user_id=user_id).first()
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
+
+    # Check for duplicate code in this book
+    if Account.query.filter_by(user_id=user_id, book_id=book_id, code=code).first():
+        return jsonify({'error': 'Account code already exists in this book'}), 400
+
+    acc = Account(
+        user_id=user_id,
+        book_id=book_id,
+        name=name,
+        type=type_,
+        code=code,
+        category=category,
+        parent_id=parent_id
+    )
+    db.session.add(acc)
+    db.session.commit()
+    return jsonify({'message': 'Account added', 'id': acc.id}), 201
 
 @accounts_bp.route('/<int:account_id>', methods=['PUT'])
 @jwt_required()

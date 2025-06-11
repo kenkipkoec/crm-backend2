@@ -13,19 +13,23 @@ def get_accounts():
     book_id = request.args.get('book_id', type=int)
     if not book_id:
         return jsonify({'error': 'book_id is required'}), 400
-    # Check if book exists for this user
+    # Defensive: Check if book exists for this user
     book = AccountingBook.query.filter_by(id=book_id, user_id=user_id).first()
     if not book:
         return jsonify({'error': 'Book not found'}), 404
-    accounts = Account.query.filter_by(user_id=user_id, book_id=book_id).all()
-    return jsonify([{
-        'id': acc.id,
-        'name': acc.name,
-        'type': acc.type,
-        'code': acc.code,
-        'category': acc.category,
-        'parent_id': acc.parent_id
-    } for acc in accounts])
+    try:
+        accounts = Account.query.filter_by(user_id=user_id, book_id=book_id).all()
+        return jsonify([{
+            'id': acc.id,
+            'name': acc.name,
+            'type': acc.type,
+            'code': acc.code,
+            'category': acc.category,
+            'parent_id': acc.parent_id
+        } for acc in accounts])
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to fetch accounts: {str(e)}'}), 500
 
 @accounts_bp.route('/', methods=['POST'])
 @jwt_required()
@@ -39,31 +43,35 @@ def add_account():
     category = data.get('category')
     parent_id = data.get('parent_id')
 
-    # Validate required fields
     if not all([book_id, name, type_, code, category]):
         return jsonify({'error': 'All fields (book_id, name, type, code, category) are required'}), 400
 
-    # Check if book exists for this user
     book = AccountingBook.query.filter_by(id=book_id, user_id=user_id).first()
     if not book:
         return jsonify({'error': 'Book not found'}), 404
 
-    # Check for duplicate code in this book
     if Account.query.filter_by(user_id=user_id, book_id=book_id, code=code).first():
         return jsonify({'error': 'Account code already exists in this book'}), 400
 
-    acc = Account(
-        user_id=user_id,
-        book_id=book_id,
-        name=name,
-        type=type_,
-        code=code,
-        category=category,
-        parent_id=parent_id
-    )
-    db.session.add(acc)
-    db.session.commit()
-    return jsonify({'message': 'Account added', 'id': acc.id}), 201
+    try:
+        acc = Account(
+            user_id=user_id,
+            book_id=book_id,
+            name=name,
+            type=type_,
+            code=code,
+            category=category,
+            parent_id=parent_id
+        )
+        db.session.add(acc)
+        db.session.commit()
+        return jsonify({'message': 'Account added', 'id': acc.id}), 201
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify({'error': 'Integrity error: ' + str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to add account: ' + str(e)}), 500
 
 @accounts_bp.route('/<int:account_id>', methods=['PUT'])
 @jwt_required()

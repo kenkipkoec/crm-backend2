@@ -27,6 +27,10 @@ def get_journal_entries():
     book_id = request.args.get("book_id", type=int)
     if not book_id:
         return jsonify({"error": "book_id is required"}), 400
+    # Check if book exists for this user
+    book = AccountingBook.query.filter_by(id=book_id, user_id=user_id).first()
+    if not book:
+        return jsonify({"error": "Book not found"}), 404
     entries = (
         JournalEntry.query.filter_by(user_id=user_id, book_id=book_id)
         .order_by(JournalEntry.date.desc())
@@ -165,6 +169,10 @@ def trial_balance():
     book_id = request.args.get("book_id", type=int)
     if not book_id:
         return jsonify({"error": "book_id is required"}), 400
+    # Check if book exists for this user
+    book = AccountingBook.query.filter_by(id=book_id, user_id=user_id).first()
+    if not book:
+        return jsonify({"error": "Book not found"}), 404
     accounts = Account.query.filter_by(user_id=user_id, book_id=book_id).all()
     result = []
     total_debit = 0.0

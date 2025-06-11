@@ -1,7 +1,7 @@
 # routes/accounts.py
 from flask import Blueprint, request, jsonify
-from models import db, Account, JournalLine
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from models import db, Account, AccountingBook, JournalLine
 from sqlalchemy.exc import IntegrityError
 
 accounts_bp = Blueprint('accounts', __name__)
@@ -13,6 +13,10 @@ def get_accounts():
     book_id = request.args.get('book_id', type=int)
     if not book_id:
         return jsonify({'error': 'book_id is required'}), 400
+    # Check if book exists for this user
+    book = AccountingBook.query.filter_by(id=book_id, user_id=user_id).first()
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
     accounts = Account.query.filter_by(user_id=user_id, book_id=book_id).all()
     return jsonify([{
         'id': acc.id,

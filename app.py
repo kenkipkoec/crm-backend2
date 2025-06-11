@@ -59,14 +59,14 @@ def create_app():
     app.register_blueprint(journal_bp, url_prefix="/api/journal")
     app.register_blueprint(books_bp, url_prefix="/api/books")
 
-    # --- AUTO-RUN MIGRATIONS ON STARTUP (Flask 3.x compatible) ---
+    logger.info("Starting migrations...")
     with app.app_context():
         try:
             upgrade()
             logger.info("Database migrations applied successfully.")
         except Exception as e:
             logger.error(f"Failed to apply migrations: {e}")
-
+    logger.info("Migrations finished, app is ready.")
     return app
 
 if __name__ == "__main__":

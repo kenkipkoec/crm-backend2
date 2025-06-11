@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, AccountingBook, Account, JournalEntry
+from sqlalchemy.exc import OperationalError
 
 books_bp = Blueprint('books', __name__)
 
@@ -8,18 +9,24 @@ books_bp = Blueprint('books', __name__)
 @jwt_required()
 def list_books():
     user_id = get_jwt_identity()
-    books = AccountingBook.query.filter_by(user_id=user_id).all()
-    return jsonify([{"id": b.id, "name": b.name, "created_at": b.created_at.isoformat()} for b in books])
+    try:
+        books = AccountingBook.query.filter_by(user_id=user_id).all()
+        return jsonify([{"id": b.id, "name": b.name, "created_at": b.created_at.isoformat() if b.created_at else None} for b in books])
+    except OperationalError:
+        return jsonify({"error": "Database not initialized. Please try again in a moment."}), 500
 
 @books_bp.route('/', methods=['POST'])
 @jwt_required()
 def create_book():
     user_id = get_jwt_identity()
     data = request.get_json()
-    book = AccountingBook(user_id=user_id, name=data['name'])
+    name = data.get("name")
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    book = AccountingBook(user_id=user_id, name=name)
     db.session.add(book)
     db.session.commit()
-    return jsonify({"id": book.id, "name": book.name}), 201
+    return jsonify({"id": book.id, "name": book.name, "created_at": book.created_at.isoformat() if book.created_at else None}), 201
 
 @books_bp.route('/<int:book_id>', methods=['PUT'])
 @jwt_required()

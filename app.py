@@ -3,7 +3,7 @@ from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_jwt_extended import JWTManager
-from flask_migrate import Migrate
+from flask_migrate import Migrate, upgrade
 import os
 import logging
 
@@ -41,13 +41,13 @@ def create_app():
 
     # Correct CORS setup for frontend (Vercel + optional localhost)
     CORS(
-    app,
-    supports_credentials=True,
-    resources={r"/api/*": {"origins": [
-        "https://crm-web-app-orpin.vercel.app",
-        "http://localhost:5173"
-    ]}}
-)
+        app,
+        supports_credentials=True,
+        resources={r"/api/*": {"origins": [
+            "https://crm-web-app-orpin.vercel.app",
+            "http://localhost:5173"
+        ]}}
+    )
 
     app.url_map.strict_slashes = False
 
@@ -58,6 +58,16 @@ def create_app():
     app.register_blueprint(accounts_bp, url_prefix="/api/accounts")
     app.register_blueprint(journal_bp, url_prefix="/api/journal")
     app.register_blueprint(books_bp, url_prefix="/api/books")
+
+    # --- AUTO-RUN MIGRATIONS ON STARTUP ---
+    @app.before_first_request
+    def run_migrations():
+        with app.app_context():
+            try:
+                upgrade()
+                logger.info("Database migrations applied successfully.")
+            except Exception as e:
+                logger.error(f"Failed to apply migrations: {e}")
 
     return app
 
